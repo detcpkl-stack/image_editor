@@ -1,4 +1,5 @@
 
+
 name: Build Android APK
 
 on:
@@ -10,7 +11,7 @@ on:
 
 jobs:
   build:
-    name: Build AI Photo Studio APK
+    name: Build AI Photo Studio
     runs-on: ubuntu-latest
 
     steps:
@@ -23,18 +24,26 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          yes | sdkmanager --licenses || true
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
 
-      - name: Make Gradle executable
-        run: chmod +x gradlew
+      - name: Check Gradle wrapper
+        run: |
+          chmod +x gradlew
+          ./gradlew --version
 
-      - name: Build APK
+      - name: Build Android APK
         run: ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AI-Photo-Studio-debug-apk
+          name: AI-Photo-Studio-APK
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
