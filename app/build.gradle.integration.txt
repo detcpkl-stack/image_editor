@@ -1,0 +1,13 @@
+Add this dependency to your existing app/build.gradle dependencies block:
+
+dependencies {
+    implementation project(':photoai')
+}
+
+Do not replace your existing app configuration. Keep your current:
+namespace 'com.example.aiphotostudio'
+applicationId 'com.example.aiphotostudio'
+compileSdk 35
+minSdk 31
+targetSdk 35
+Java 17
