@@ -1,5 +1,4 @@
-
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
@@ -7,8 +6,8 @@
     <application
         android:allowBackup="true"
         android:label="AI Photo Studio"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
-        android:supportsRtl="true">
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
             android:name="com.example.aiphotostudio.MainActivity"
@@ -24,5 +23,4 @@
     </application>
 
 </manifest>
-
 
