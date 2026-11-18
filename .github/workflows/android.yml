@@ -1,4 +1,3 @@
-
 name: Build AI Photo Studio APK
 
 on:
@@ -26,17 +25,10 @@ jobs:
 
       - name: Check Android Manifest
         run: |
-          echo "Checking AndroidManifest.xml"
-          cat -A app/src/main/AndroidManifest.xml
           python3 - <<'PY'
           import xml.etree.ElementTree as ET
-          path = "app/src/main/AndroidManifest.xml"
-          try:
-              ET.parse(path)
-              print("SUCCESS: Valid XML")
-          except ET.ParseError as e:
-              print("MANIFEST ERROR:", e)
-              raise
+          ET.parse("app/src/main/AndroidManifest.xml")
+          print("SUCCESS: Valid AndroidManifest.xml")
           PY
 
       - name: Build APK
@@ -47,4 +39,5 @@ jobs:
         with:
           name: AI-Photo-Studio-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+
 
