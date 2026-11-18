@@ -1,0 +1,26 @@
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'com.example.photoai'
+    compileSdk 35
+
+    defaultConfig {
+        minSdk 23
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    // OpenCV Java/Android SDK distributed through Maven Central.
+    implementation 'org.opencv:opencv:4.10.0'
+
+    // On-device person segmentation. No API key; model runs on device.
+    implementation 'com.google.mlkit:segmentation-selfie:16.0.0-beta6'
+}
