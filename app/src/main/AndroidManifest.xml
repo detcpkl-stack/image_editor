@@ -2,11 +2,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Internet permission for AI features -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Image access for Android 13 and above -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+
+    <!-- Image access for Android 12 and below -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:allowBackup="true"
         android:label="AI Photo Studio"
-        android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:supportsRtl="true">
 
         <activity
             android:name=".MainActivity"
@@ -22,4 +32,5 @@
     </application>
 
 </manifest>
+
 
