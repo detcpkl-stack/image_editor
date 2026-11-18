@@ -13,6 +13,8 @@ android {
         targetSdk 35
         versionCode 1
         versionName '1.0'
+
+        buildConfigField "String", "AI_SERVER_URL", "\"https://ai-photo-studio-api-l2b0.onrender.com\""
     }
 
     compileOptions {
@@ -22,9 +24,5 @@ android {
 
     buildFeatures {
         buildConfig true
-    }
-
-    defaultConfig {
-        buildConfigField "String", "AI_SERVER_URL", "\"https://YOUR-SERVICE.onrender.com\""
     }
 }
