@@ -1,5 +1,6 @@
+
 package com.example.aiphotostudio;
-import java.util.ArrayList;
+
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.ContentValues;
@@ -281,6 +282,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < icons.length; i++) {
 
             final Runnable action = actions[i];
+            final String toolLabel = labels[i];
 
             LinearLayout tile = new LinearLayout(this);
             tile.setOrientation(LinearLayout.VERTICAL);
@@ -312,7 +314,7 @@ public class MainActivity extends Activity {
             row.addView(tile, params);
 
             tile.setOnClickListener(v -> {
-                if (currentBitmap == null && !"Collage".equals(labels[i])) {
+                if (currentBitmap == null && !"Collage".equals(toolLabel)) {
                     toast("Please select a photo first");
                     return;
                 }
