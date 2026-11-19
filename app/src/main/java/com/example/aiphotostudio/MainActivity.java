@@ -1,4 +1,3 @@
-
 package com.example.aiphotostudio;
 
 import android.app.Activity;
@@ -55,6 +54,7 @@ public class MainActivity extends Activity {
 
     private static final int MAX_HISTORY = 8;
     private static final int PICK_IMAGE = 1001;
+    private static final int PICK_COLLAGE_IMAGES = 1002;
 
     private final ExecutorService executor =
             Executors.newSingleThreadExecutor();
@@ -240,12 +240,13 @@ public class MainActivity extends Activity {
         addSection("SPECIAL TOOLS");
 
         addToolRow(
-                new String[]{"🧹", "✨", "🎨", "ℹ"},
-                new String[]{"Remove People", "Auto Edit", "Filters", "About"},
+                new String[]{"🧹", "✨", "🎨", "🖼", "ℹ"},
+                new String[]{"Remove People", "Auto Edit", "Filters", "Collage", "About"},
                 new Runnable[]{
                         this::removePeople,
                         this::autoEdit,
                         this::showFilters,
+                        this::createCollage,
                         this::showAbout
                 });
 
@@ -311,7 +312,7 @@ public class MainActivity extends Activity {
             row.addView(tile, params);
 
             tile.setOnClickListener(v -> {
-                if (currentBitmap == null) {
+                if (currentBitmap == null && !"Collage".equals(labels[i])) {
                     toast("Please select a photo first");
                     return;
                 }
@@ -355,6 +356,135 @@ public class MainActivity extends Activity {
                 && data.getData() != null) {
 
             loadImage(data.getData());
+        } else if (requestCode == PICK_COLLAGE_IMAGES
+                && resultCode == RESULT_OK && data != null) {
+            ArrayList<Uri> selected = new ArrayList<>();
+            if (data.getClipData() != null) {
+                for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                    selected.add(data.getClipData().getItemAt(i).getUri());
+                }
+            } else if (data.getData() != null) {
+                selected.add(data.getData());
+            }
+            if (selected.size() < 2) {
+                toast("Select at least 2 photos for a collage");
+            } else {
+                buildCollage(selected);
+            }
+        }
+    }
+
+    // ----------------------------------------------------
+    // COLLAGE MAKER
+    // ----------------------------------------------------
+
+    private void createCollage() {
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
+        intent.setType("image/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        startActivityForResult(Intent.createChooser(intent, "Select 2 to 6 photos"),
+                PICK_COLLAGE_IMAGES);
+    }
+
+    private void buildCollage(ArrayList<Uri> uris) {
+        if (uris.size() > 6) {
+            toast("Please select up to 6 photos");
+            return;
+        }
+        if (isBusy) {
+            toast("Please wait for the current edit to finish");
+            return;
+        }
+        isBusy = true;
+        executor.execute(() -> {
+            Bitmap collage = null;
+            ArrayList<Bitmap> decoded = new ArrayList<>();
+            try {
+                int count = uris.size();
+                int cols = count <= 2 ? 2 : 2;
+                int rows = (count + cols - 1) / cols;
+                final int cell = 600;
+                final int gap = 12;
+                final int border = 18;
+                int width = cols * cell + (cols + 1) * gap;
+                int height = rows * cell + (rows + 1) * gap;
+                collage = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+                Canvas canvas = new Canvas(collage);
+                canvas.drawColor(Color.rgb(245, 245, 248));
+                Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+                for (int i = 0; i < count; i++) {
+                    Bitmap photo = decodeCollagePhoto(uris.get(i), cell);
+                    if (photo == null) continue;
+                    decoded.add(photo);
+                    int x = gap + (i % cols) * (cell + gap);
+                    int y = gap + (i / cols) * (cell + gap);
+                    Rect src = centerCropRect(photo.getWidth(), photo.getHeight(), cell, cell);
+                    Rect dst = new Rect(x, y, x + cell, y + cell);
+                    canvas.drawBitmap(photo, src, dst, paint);
+                }
+                Bitmap finalCollage = resizeBitmapIfNeeded(collage, 1280);
+                if (finalCollage != collage) collage.recycle();
+                collage = finalCollage;
+                Bitmap ready = collage.copy(Bitmap.Config.ARGB_8888, true);
+                mainHandler.post(() -> {
+                    if (ready != null) {
+                        if (currentBitmap != null) saveHistory();
+                        recycleBitmap(currentBitmap);
+                        currentBitmap = ready;
+                        maskingMode = false;
+                        if (maskView != null) maskView.clearMask();
+                        showBitmap();
+                        toast("Collage created! You can edit or save it now.");
+                    } else {
+                        toast("Could not create collage");
+                    }
+                    isBusy = false;
+                });
+            } catch (OutOfMemoryError memoryError) {
+                System.gc();
+                mainHandler.post(() -> toast("Not enough memory to create collage. Try fewer or smaller photos."));
+                isBusy = false;
+            } catch (Exception e) {
+                mainHandler.post(() -> toast("Collage creation failed"));
+                isBusy = false;
+            } finally {
+                for (Bitmap b : decoded) recycleBitmap(b);
+                recycleBitmap(collage);
+            }
+        });
+    }
+
+
+    private Bitmap decodeCollagePhoto(Uri uri, int maxSize) throws Exception {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            BitmapFactory.decodeStream(input, null, bounds);
+        }
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null;
+        int sample = 1;
+        while (bounds.outWidth / sample > maxSize * 2 || bounds.outHeight / sample > maxSize * 2) sample *= 2;
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+        try (InputStream input = getContentResolver().openInputStream(uri)) {
+            return BitmapFactory.decodeStream(input, null, options);
+        }
+    }
+
+
+    private Rect centerCropRect(int sourceWidth, int sourceHeight, int targetWidth, int targetHeight) {
+        float targetRatio = (float) targetWidth / targetHeight;
+        float sourceRatio = (float) sourceWidth / sourceHeight;
+        if (sourceRatio > targetRatio) {
+            int cropWidth = Math.round(sourceHeight * targetRatio);
+            int left = (sourceWidth - cropWidth) / 2;
+            return new Rect(left, 0, left + cropWidth, sourceHeight);
+        } else {
+            int cropHeight = Math.round(sourceWidth / targetRatio);
+            int top = (sourceHeight - cropHeight) / 2;
+            return new Rect(0, top, sourceWidth, top + cropHeight);
         }
     }
 
