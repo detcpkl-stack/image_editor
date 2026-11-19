@@ -1,4 +1,5 @@
-package com.example.photoai;
+
+package com.example.aiphotostudio;
 
 import android.app.Activity;
 import android.app.AlertDialog;
@@ -8,10 +9,12 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
-import android.graphics.Matrix;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.Matrix;
 import android.graphics.Rect;
-import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -19,15 +22,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.view.Gravity;
+import android.view.MotionEvent;
 import android.view.View;
-import android.view.Window;
-import android.view.WindowManager;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -39,43 +41,20 @@ import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
 
-    // --------------------------------------------------
-    // THEME
-    // --------------------------------------------------
-
-    private static final int BG = Color.rgb(12, 15, 24);
-    private static final int PANEL = Color.rgb(22, 27, 40);
-    private static final int TILE = Color.rgb(30, 37, 53);
-    private static final int ACCENT = Color.rgb(130, 105, 255);
-    private static final int TEXT = Color.WHITE;
-    private static final int MUTED = Color.rgb(164, 174, 194);
-
-    // --------------------------------------------------
-    // IMAGE
-    // --------------------------------------------------
-
-    private Bitmap currentBitmap;
+    private LinearLayout root;
+    private LinearLayout toolsContainer;
+    private FrameLayout imageFrame;
     private ImageView imageView;
+    private MaskView maskView;
 
-    private TextView statusText;
-    private TextView imageInfoText;
-
-    private boolean processing = false;
-
-    private OpenCvPhotoAIEngine photoAI;
-
-    // --------------------------------------------------
-    // UNDO / REDO
-    // --------------------------------------------------
+    private Bitmap originalBitmap;
+    private Bitmap currentBitmap;
 
     private final ArrayDeque<Bitmap> undoStack = new ArrayDeque<>();
     private final ArrayDeque<Bitmap> redoStack = new ArrayDeque<>();
 
-    private static final int MAX_HISTORY = 10;
-
-    // --------------------------------------------------
-    // THREADING
-    // --------------------------------------------------
+    private static final int MAX_HISTORY = 8;
+    private static final int PICK_IMAGE = 1001;
 
     private final ExecutorService executor =
             Executors.newSingleThreadExecutor();
@@ -83,311 +62,199 @@ public class MainActivity extends Activity {
     private final Handler mainHandler =
             new Handler(Looper.getMainLooper());
 
-    // --------------------------------------------------
-    // LAYOUT
-    // --------------------------------------------------
+    private boolean isBusy = false;
+    private boolean maskingMode = false;
 
-    private LinearLayout root;
-    private LinearLayout toolsContainer;
-
-    // --------------------------------------------------
-    // ACTIVITY
-    // --------------------------------------------------
+    private int brushSize = 35;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        photoAI = new OpenCvPhotoAIEngine();
-
-        getWindow().setStatusBarColor(BG);
-        getWindow().setNavigationBarColor(BG);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            getWindow().getDecorView().setSystemUiVisibility(0);
-        }
-
         createUI();
     }
 
-    // ==================================================
+    // ----------------------------------------------------
     // MAIN UI
-    // ==================================================
+    // ----------------------------------------------------
 
     private void createUI() {
 
         root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(BG);
+        root.setBackgroundColor(Color.rgb(17, 18, 27));
 
-        root.setPadding(dp(16), dp(12), dp(16), dp(12));
+        ScrollView scrollView = new ScrollView(this);
+        scrollView.setFillViewport(false);
 
-        setContentView(root);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(16), dp(12), dp(16), dp(24));
 
-        // HEADER
-        createHeader();
+        scrollView.addView(content);
 
-        // STATUS
-        statusText = new TextView(this);
-        statusText.setText("Ready to edit your photo");
-        statusText.setTextColor(MUTED);
-        statusText.setTextSize(12);
-        statusText.setPadding(0, dp(8), 0, dp(8));
+        root.addView(scrollView, new LinearLayout.LayoutParams(
+                -1, 0, 1f));
 
-        root.addView(statusText);
+        // Header
+        TextView title = text("AI PHOTO STUDIO", 24,
+                Color.WHITE, true);
 
-        // PHOTO PREVIEW
-        createPreview();
+        content.addView(title);
 
-        // PHOTO INFORMATION
-        imageInfoText = new TextView(this);
-        imageInfoText.setText("No image selected");
-        imageInfoText.setTextColor(MUTED);
-        imageInfoText.setTextSize(12);
-        imageInfoText.setGravity(Gravity.CENTER);
-        imageInfoText.setPadding(0, dp(10), 0, dp(12));
+        TextView subtitle = text(
+                "Offline photo editing studio",
+                13, Color.LTGRAY, false);
 
-        root.addView(imageInfoText);
+        content.addView(subtitle);
 
-        // TOOLS SCROLL
-        ScrollView scroll = new ScrollView(this);
+        addSpace(content, 18);
 
-        scroll.setFillViewport(false);
+        // Image container
+        imageFrame = new FrameLayout(this);
+        imageFrame.setBackgroundColor(Color.rgb(30, 31, 42));
 
-        LinearLayout.LayoutParams scrollParams =
+        imageView = new ImageView(this);
+        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        imageView.setAdjustViewBounds(true;
+
+        imageFrame.addView(imageView,
+                new FrameLayout.LayoutParams(
+                        -1, -1));
+
+        maskView = new MaskView();
+        imageFrame.addView(maskView,
+                new FrameLayout.LayoutParams(
+                        -1, -1));
+
+        content.addView(imageFrame,
                 new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        0,
-                        1
-                );
+                        -1, dp(340)));
 
-        root.addView(scroll, scrollParams);
+        addSpace(content, 12);
+
+        TextView imageHint = text(
+                "Choose a photo to begin editing",
+                13, Color.GRAY, false);
+
+        imageHint.setGravity(Gravity.CENTER);
+        content.addView(imageHint);
+
+        addSpace(content, 15);
+
+        Button galleryButton = button("📷  SELECT PHOTO");
+        galleryButton.setOnClickListener(v -> pickImage());
+
+        content.addView(galleryButton,
+                new LinearLayout.LayoutParams(
+                        -1, dp(50)));
+
+        addSpace(content, 20);
 
         toolsContainer = new LinearLayout(this);
         toolsContainer.setOrientation(LinearLayout.VERTICAL);
-
-        scroll.addView(toolsContainer);
+        content.addView(toolsContainer);
 
         createTools();
 
-        // BOTTOM STATUS BAR
-        createFooter();
+        setContentView(root);
     }
 
-    // ==================================================
-    // HEADER
-    // ==================================================
-
-    private void createHeader() {
-
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-
-        LinearLayout titleBox = new LinearLayout(this);
-        titleBox.setOrientation(LinearLayout.VERTICAL);
-
-        TextView title = new TextView(this);
-        title.setText("AI Photo Studio");
-        title.setTextColor(TEXT);
-        title.setTextSize(24);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-
-        TextView subtitle = new TextView(this);
-        subtitle.setText("CREATIVE PHOTO EDITOR");
-        subtitle.setTextColor(ACCENT);
-        subtitle.setTextSize(10);
-        subtitle.setLetterSpacing(0.15f);
-
-        titleBox.addView(title);
-        titleBox.addView(subtitle);
-
-        header.addView(titleBox,
-                new LinearLayout.LayoutParams(0,
-                        LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        TextView logo = new TextView(this);
-        logo.setText("✦");
-        logo.setTextSize(26);
-        logo.setTextColor(Color.WHITE);
-        logo.setGravity(Gravity.CENTER);
-
-        GradientDrawable logoBg = new GradientDrawable(
-                GradientDrawable.Orientation.TL_BR,
-                new int[]{
-                        Color.rgb(120, 92, 255),
-                        Color.rgb(65, 142, 255)
-                });
-
-        logoBg.setCornerRadius(dp(18));
-
-        logo.setBackground(logoBg);
-
-        logo.setPadding(dp(12), dp(5), dp(12), dp(5));
-
-        header.addView(logo);
-
-        root.addView(header);
-    }
-
-    // ==================================================
-    // PREVIEW
-    // ==================================================
-
-    private void createPreview() {
-
-        FrameLayout previewFrame = new FrameLayout(this);
-
-        GradientDrawable previewBackground = new GradientDrawable();
-        previewBackground.setColor(PANEL);
-        previewBackground.setCornerRadius(dp(24));
-
-        previewFrame.setBackground(previewBackground);
-
-        previewFrame.setClipToOutline(true);
-
-        LinearLayout.LayoutParams frameParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        dp(260)
-                );
-
-        frameParams.setMargins(0, dp(8), 0, dp(8));
-
-        root.addView(previewFrame, frameParams);
-
-        imageView = new ImageView(this);
-
-        imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        imageView.setAdjustViewBounds(true);
-
-        previewFrame.addView(imageView,
-                new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                ));
-
-        // EMPTY STATE
-        TextView emptyText = new TextView(this);
-
-        emptyText.setText("✦\n\nSelect a photo to begin");
-        emptyText.setTextColor(MUTED);
-        emptyText.setTextSize(15);
-        emptyText.setGravity(Gravity.CENTER);
-
-        previewFrame.addView(emptyText,
-                new FrameLayout.LayoutParams(
-                        FrameLayout.LayoutParams.MATCH_PARENT,
-                        FrameLayout.LayoutParams.MATCH_PARENT
-                ));
-
-        imageView.setTag(emptyText);
-
-        previewFrame.setOnClickListener(v -> pickImage());
-    }
-
-    // ==================================================
-    // TOOLS
-    // ==================================================
+    // ----------------------------------------------------
+    // TOOL BUTTONS
+    // ----------------------------------------------------
 
     private void createTools() {
 
-        toolsContainer.removeAllViews();
-
-        // QUICK ACTIONS
-        addSectionTitle(toolsContainer, "QUICK ACTIONS");
+        addSection("QUICK ACTIONS");
 
         addToolRow(
-                toolsContainer,
-                new String[]{"🖼️", "✨", "↩️", "💾"},
-                new String[]{"Gallery", "Enhance", "Undo", "Save"},
+                new String[]{"✨", "↩", "↪", "💾"},
+                new String[]{"Enhance", "Undo", "Redo", "Save"},
                 new Runnable[]{
-                        this::pickImage,
                         this::autoEnhance,
                         this::undo,
+                        this::redo,
                         this::saveImage
-                }
-        );
+                });
 
-        // BASIC EDIT
-        addSectionTitle(toolsContainer, "BASIC EDIT");
+        addSection("BASIC EDIT");
 
         addToolRow(
-                toolsContainer,
-                new String[]{"✂️", "🔄", "↔️", "↕️"},
+                new String[]{"✂", "⟳", "↔", "↕"},
                 new String[]{"Crop", "Rotate", "Flip H", "Flip V"},
                 new Runnable[]{
                         this::cropImage,
-                        () -> rotateImage(90),
+                        this::rotateImage,
                         this::flipHorizontal,
                         this::flipVertical
-                }
-        );
+                });
 
         addToolRow(
-                toolsContainer,
-                new String[]{"📐", "↪️", "🔍", "🖼️"},
-                new String[]{"Resize", "Redo", "Original", "Gallery"},
+                new String[]{"↔", "◉", "⟲", "↗"},
+                new String[]{"Resize", "Original", "Reset", "Auto Color"},
                 new Runnable[]{
                         this::resizeImage,
-                        this::redo,
                         this::showOriginal,
-                        this::pickImage
-                }
-        );
+                        this::resetImage,
+                        this::autoColor
+                });
 
-        // ENHANCE
-        addSectionTitle(toolsContainer, "AI & IMAGE ENHANCEMENT");
+        addSection("ENHANCEMENT");
 
         addToolRow(
-                toolsContainer,
-                new String[]{"🌈", "💆", "👤", "☀️"},
-                new String[]{"Auto Color", "Smooth", "Natural Slim", "Warm"},
+                new String[]{"☀", "◌", "♧", "☕"},
+                new String[]{"Brightness", "Smooth", "Natural Slim", "Warm"},
                 new Runnable[]{
-                        this::autoColor,
-                        this::smoothSkin,
+                        this::brightness,
+                        this::smoothImage,
                         this::slimPerson,
                         this::warmFilter
-                }
-        );
+                });
 
-        // FILTERS
-        addSectionTitle(toolsContainer, "CREATIVE FILTERS");
+        addSection("CREATIVE FILTERS");
 
         addToolRow(
-                toolsContainer,
-                new String[]{"❄️", "⚫", "🟤", "🌑"},
+                new String[]{"❄", "◐", "◧", "◒"},
                 new String[]{"Cool", "B&W", "Sepia", "Vignette"},
                 new Runnable[]{
                         this::coolFilter,
                         this::blackAndWhite,
                         this::sepiaFilter,
                         this::vignette
-                }
-        );
+                });
 
-        // SPECIAL TOOLS
-        addSectionTitle(toolsContainer, "SPECIAL TOOLS");
+        addSection("SPECIAL TOOLS");
 
         addToolRow(
-                toolsContainer,
-                new String[]{"🧹", "✨", "🎨", "⚙️"},
-                new String[]{"Remove People", "Auto Edit", "Filters", "Info"},
+                new String[]{"🧹", "✨", "🎨", "ℹ"},
+                new String[]{"Remove People", "Auto Edit", "Filters", "About"},
                 new Runnable[]{
-                        this::removePeoplePlaceholder,
-                        this::autoEnhance,
+                        this::removePeople,
+                        this::autoEdit,
                         this::showFilters,
-                        this::showAppInfo
-                }
-        );
+                        this::showAbout
+                });
+
+        addSpace(toolsContainer, 15);
+
+        Button cancelMask = button("CANCEL REMOVE PEOPLE");
+        cancelMask.setOnClickListener(v -> cancelMaskMode());
+
+        toolsContainer.addView(cancelMask);
     }
 
-    // ==================================================
-    // ICON TOOL ROW
-    // ==================================================
+    private void addSection(String title) {
+
+        TextView section = text(
+                title, 14,
+                Color.rgb(184, 150, 255), true);
+
+        section.setPadding(0, dp(16), 0, dp(10));
+
+        toolsContainer.addView(section);
+    }
 
     private void addToolRow(
-            LinearLayout parent,
             String[] icons,
             String[] labels,
             Runnable[] actions) {
@@ -396,16 +263,6 @@ public class MainActivity extends Activity {
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER);
 
-        LinearLayout.LayoutParams rowParams =
-                new LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                );
-
-        rowParams.setMargins(0, dp(3), 0, dp(3));
-
-        parent.addView(row, rowParams);
-
         for (int i = 0; i < icons.length; i++) {
 
             final Runnable action = actions[i];
@@ -413,112 +270,61 @@ public class MainActivity extends Activity {
             LinearLayout tile = new LinearLayout(this);
             tile.setOrientation(LinearLayout.VERTICAL);
             tile.setGravity(Gravity.CENTER);
+            tile.setBackgroundColor(Color.rgb(34, 35, 48));
+            tile.setPadding(dp(3), dp(9), dp(3), dp(9));
 
-            tile.setPadding(dp(4), dp(9), dp(4), dp(9));
+            TextView icon = text(
+                    icons[i], 25,
+                    Color.WHITE, true);
 
-            GradientDrawable background = new GradientDrawable();
-            background.setColor(TILE);
-            background.setCornerRadius(dp(16));
-
-            tile.setBackground(background);
-
-            LinearLayout.LayoutParams tileParams =
-                    new LinearLayout.LayoutParams(
-                            0,
-                            dp(80),
-                            1
-                    );
-
-            tileParams.setMargins(dp(3), dp(3), dp(3), dp(3));
-
-            row.addView(tile, tileParams);
-
-            TextView icon = new TextView(this);
-            icon.setText(icons[i]);
-            icon.setTextSize(24);
             icon.setGravity(Gravity.CENTER);
 
-            tile.addView(icon);
+            TextView label = text(
+                    labels[i], 10,
+                    Color.LTGRAY, false);
 
-            TextView label = new TextView(this);
-            label.setText(labels[i]);
-            label.setTextColor(TEXT);
-            label.setTextSize(10);
             label.setGravity(Gravity.CENTER);
 
-            label.setPadding(0, dp(4), 0, 0);
-
+            tile.addView(icon);
             tile.addView(label);
 
-            tile.setOnClickListener(v -> {
+            LinearLayout.LayoutParams params =
+                    new LinearLayout.LayoutParams(
+                            0, dp(76), 1f);
 
-                if (processing) {
-                    Toast.makeText(
-                            this,
-                            "Please wait...",
-                            Toast.LENGTH_SHORT
-                    ).show();
+            params.setMargins(dp(3), dp(3), dp(3), dp(3));
+
+            row.addView(tile, params);
+
+            tile.setOnClickListener(v -> {
+                if (currentBitmap == null) {
+                    toast("Please select a photo first");
+                    return;
+                }
+
+                if (isBusy) {
+                    toast("Please wait...");
                     return;
                 }
 
                 action.run();
             });
         }
+
+        toolsContainer.addView(row);
     }
 
-    // ==================================================
-    // SECTION TITLE
-    // ==================================================
-
-    private void addSectionTitle(LinearLayout parent, String text) {
-
-        TextView title = new TextView(this);
-
-        title.setText(text);
-        title.setTextColor(MUTED);
-        title.setTextSize(11);
-        title.setTypeface(null, android.graphics.Typeface.BOLD);
-        title.setLetterSpacing(0.12f);
-
-        title.setPadding(dp(2), dp(15), 0, dp(6));
-
-        parent.addView(title);
-    }
-
-    // ==================================================
-    // FOOTER
-    // ==================================================
-
-    private void createFooter() {
-
-        LinearLayout footer = new LinearLayout(this);
-        footer.setGravity(Gravity.CENTER);
-        footer.setPadding(0, dp(8), 0, dp(3));
-
-        TextView text = new TextView(this);
-
-        text.setText("AI PHOTO STUDIO  •  EDIT BEAUTIFULLY");
-        text.setTextColor(MUTED);
-        text.setTextSize(10);
-        text.setGravity(Gravity.CENTER);
-
-        footer.addView(text);
-
-        root.addView(footer);
-    }
-
-    // ==================================================
-    // GALLERY
-    // ==================================================
+    // ----------------------------------------------------
+    // IMAGE PICKER
+    // ----------------------------------------------------
 
     private void pickImage() {
 
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.setType("image/*");
         intent.addCategory(Intent.CATEGORY_OPENABLE);
 
-        startActivityForResult(intent, 1001);
+        startActivityForResult(intent, PICK_IMAGE);
     }
 
     @Override
@@ -529,688 +335,1046 @@ public class MainActivity extends Activity {
 
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == 1001 &&
-                resultCode == RESULT_OK &&
-                data != null &&
-                data.getData() != null) {
+        if (requestCode == PICK_IMAGE
+                && resultCode == RESULT_OK
+                && data != null
+                && data.getData() != null) {
 
-            Uri uri = data.getData();
+            loadImage(data.getData());
+        }
+    }
 
-            try {
+    private void loadImage(Uri uri) {
 
-                Bitmap bitmap;
+        try {
 
-                try (InputStream stream =
-                             getContentResolver().openInputStream(uri)) {
+            InputStream input = getContentResolver()
+                    .openInputStream(uri);
 
-                    bitmap = BitmapFactory.decodeStream(stream);
-                }
+            Bitmap bitmap = BitmapFactory.decodeStream(input);
 
-                if (bitmap != null) {
-
-                    currentBitmap = bitmap;
-
-                    undoStack.clear();
-                    redoStack.clear();
-
-                    displayBitmap(bitmap);
-
-                    status("Photo loaded successfully");
-
-                } else {
-
-                    Toast.makeText(
-                            this,
-                            "Unable to load image",
-                            Toast.LENGTH_SHORT
-                    ).show();
-                }
-
-            } catch (Exception e) {
-
-                Toast.makeText(
-                        this,
-                        "Error loading image: " + e.getMessage(),
-                        Toast.LENGTH_LONG
-                ).show();
+            if (input != null) {
+                input.close();
             }
+
+            if (bitmap == null) {
+                toast("Unable to load image");
+                return;
+            }
+
+            // Limit memory use for large images.
+            bitmap = resizeBitmapIfNeeded(bitmap, 2048);
+
+            originalBitmap = bitmap.copy(
+                    Bitmap.Config.ARGB_8888, true);
+
+            currentBitmap = bitmap.copy(
+                    Bitmap.Config.ARGB_8888, true);
+
+            undoStack.clear();
+            redoStack.clear();
+
+            maskingMode = false;
+            maskView.clearMask();
+
+            showBitmap();
+
+            toast("Photo loaded successfully");
+
+        } catch (Exception e) {
+
+            toast("Unable to open photo");
         }
     }
 
-    // ==================================================
-    // DISPLAY
-    // ==================================================
+    private Bitmap resizeBitmapIfNeeded(
+            Bitmap bitmap, int maxSize) {
 
-    private void displayBitmap(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
 
-        currentBitmap = bitmap;
-
-        imageView.setImageBitmap(bitmap);
-
-        imageView.setVisibility(View.VISIBLE);
-
-        TextView empty = (TextView) imageView.getTag();
-
-        if (empty != null) {
-            empty.setVisibility(View.GONE);
+        if (width <= maxSize && height <= maxSize) {
+            return bitmap;
         }
 
-        imageInfoText.setText(
-                bitmap.getWidth() + " × " + bitmap.getHeight() + " px"
-        );
+        float scale = Math.min(
+                (float) maxSize / width,
+                (float) maxSize / height);
+
+        return Bitmap.createScaledBitmap(
+                bitmap,
+                Math.max(1, (int) (width * scale)),
+                Math.max(1, (int) (height * scale)),
+                true);
     }
 
-    // ==================================================
-    // UNDO HISTORY
-    // ==================================================
+    // ----------------------------------------------------
+    // BITMAP DISPLAY
+    // ----------------------------------------------------
 
-    private void saveUndo() {
+    private void showBitmap() {
+
+        if (currentBitmap != null) {
+            imageView.setImageBitmap(currentBitmap);
+        }
+
+        maskView.invalidate();
+    }
+
+    private void requireImage() {
+
+        if (currentBitmap == null) {
+            toast("Select a photo first");
+        }
+    }
+
+    // ----------------------------------------------------
+    // HISTORY / UNDO / REDO
+    // ----------------------------------------------------
+
+    private void saveHistory() {
 
         if (currentBitmap == null) return;
 
-        undoStack.push(
-                currentBitmap.copy(Bitmap.Config.ARGB_8888, true)
-        );
+        undoStack.push(currentBitmap.copy(
+                Bitmap.Config.ARGB_8888, true));
 
         while (undoStack.size() > MAX_HISTORY) {
-            undoStack.removeLast();
+            undoStack.removeLast().recycle();
         }
 
-        // Any new edit clears redo history
-        clearStack(redoStack);
+        clearRedo();
+    }
+
+    private void clearRedo() {
+
+        while (!redoStack.isEmpty()) {
+            Bitmap b = redoStack.pop();
+
+            if (!b.isRecycled()) {
+                b.recycle();
+            }
+        }
     }
 
     private void undo() {
 
         if (undoStack.isEmpty()) {
-
-            Toast.makeText(
-                    this,
-                    "Nothing to undo",
-                    Toast.LENGTH_SHORT
-            ).show();
-
+            toast("Nothing to undo");
             return;
         }
 
-        redoStack.push(
-                currentBitmap.copy(Bitmap.Config.ARGB_8888, true)
-        );
+        redoStack.push(currentBitmap.copy(
+                Bitmap.Config.ARGB_8888, true));
 
-        Bitmap restored = undoStack.pop();
+        currentBitmap = undoStack.pop();
 
-        displayBitmap(restored);
-
-        status("Undo completed");
+        showBitmap();
     }
 
     private void redo() {
 
         if (redoStack.isEmpty()) {
-
-            Toast.makeText(
-                    this,
-                    "Nothing to redo",
-                    Toast.LENGTH_SHORT
-            ).show();
-
+            toast("Nothing to redo");
             return;
         }
 
-        undoStack.push(
-                currentBitmap.copy(Bitmap.Config.ARGB_8888, true)
-        );
+        undoStack.push(currentBitmap.copy(
+                Bitmap.Config.ARGB_8888, true));
 
-        Bitmap restored = redoStack.pop();
+        currentBitmap = redoStack.pop();
 
-        displayBitmap(restored);
-
-        status("Redo completed");
+        showBitmap();
     }
 
-    private void clearStack(ArrayDeque<Bitmap> stack) {
+    // ----------------------------------------------------
+    // GENERIC EDIT RUNNER
+    // ----------------------------------------------------
 
-        while (!stack.isEmpty()) {
-
-            Bitmap bitmap = stack.pop();
-
-            if (bitmap != null && !bitmap.isRecycled()) {
-                bitmap.recycle();
-            }
-        }
-    }
-
-    // ==================================================
-    // ORIGINAL PHOTO
-    // ==================================================
-
-    private Bitmap originalBitmap;
-
-    private void showOriginal() {
-
-        if (currentBitmap == null) {
-            checkImage();
-            return;
-        }
-
-        Toast.makeText(
-                this,
-                "Load a photo again to reset all edits",
-                Toast.LENGTH_SHORT
-        ).show();
-    }
-
-    // ==================================================
-    // AUTO ENHANCE
-    // ==================================================
-
-    private void autoEnhance() {
-
-        runEdit("Enhancing photo...", () ->
-                photoAI.autoEnhance(currentBitmap));
-    }
-
-    // ==================================================
-    // AUTO COLOR
-    // ==================================================
-
-    private void autoColor() {
-
-        runEdit("Adjusting colors...", () ->
-                photoAI.autoColor(currentBitmap));
-    }
-
-    // ==================================================
-    // SMOOTH
-    // ==================================================
-
-    private void smoothSkin() {
-
-        runEdit("Smoothing image...", () ->
-                photoAI.smoothImage(currentBitmap));
-    }
-
-    // ==================================================
-    // NATURAL SLIM
-    // ==================================================
-
-    private void slimPerson() {
-
-        runEdit("Applying natural slimming...", () ->
-                photoAI.slimPerson(currentBitmap, 0.08f));
-    }
-
-    // ==================================================
-    // FILTERS
-    // ==================================================
-
-    private void warmFilter() {
-
-        runEdit("Applying warm filter...", () ->
-                photoAI.warmFilter(currentBitmap));
-    }
-
-    private void coolFilter() {
-
-        runEdit("Applying cool filter...", () ->
-                photoAI.coolFilter(currentBitmap));
-    }
-
-    private void blackAndWhite() {
-
-        runEdit("Applying black & white...", () ->
-                photoAI.blackAndWhite(currentBitmap));
-    }
-
-    private void sepiaFilter() {
-
-        runEdit("Applying sepia...", () ->
-                photoAI.sepiaFilter(currentBitmap));
-    }
-
-    private void vignette() {
-
-        runEdit("Applying vignette...", () ->
-                photoAI.vignette(currentBitmap));
-    }
-
-    // ==================================================
-    // IMAGE PROCESSOR
-    // ==================================================
-
-    private interface BitmapOperation {
-        Bitmap execute() throws Exception;
+    interface ImageOperation {
+        Bitmap apply(Bitmap source);
     }
 
     private void runEdit(
             String message,
-            BitmapOperation operation) {
+            ImageOperation operation) {
 
-        if (!checkImage()) return;
+        if (currentBitmap == null || isBusy) {
+            return;
+        }
 
-        if (processing) return;
-
-        saveUndo();
-
-        processing = true;
-
-        status(message);
+        isBusy = true;
 
         Bitmap input = currentBitmap.copy(
-                Bitmap.Config.ARGB_8888,
-                true
-        );
+                Bitmap.Config.ARGB_8888, true);
+
+        toast(message);
 
         executor.execute(() -> {
 
             Bitmap result = null;
 
             try {
-
-                result = operation.execute();
-
-                Bitmap finalResult = result;
-
-                mainHandler.post(() -> {
-
-                    if (finalResult != null) {
-
-                        displayBitmap(finalResult);
-
-                        status("Edit completed successfully");
-
-                    } else {
-
-                        status("Unable to process image");
-                    }
-
-                    processing = false;
-                });
-
+                result = operation.apply(input);
             } catch (Exception e) {
-
-                mainHandler.post(() -> {
-
-                    status("Processing failed");
-
-                    Toast.makeText(
-                            MainActivity.this,
-                            e.getMessage(),
-                            Toast.LENGTH_LONG
-                    ).show();
-
-                    processing = false;
-                });
-
-            } finally {
-
-                if (input != null && !input.isRecycled()) {
-                    input.recycle();
-                }
+                e.printStackTrace();
             }
+
+            final Bitmap finalResult = result;
+
+            mainHandler.post(() -> {
+
+                isBusy = false;
+
+                if (finalResult != null) {
+
+                    saveHistory();
+
+                    currentBitmap = finalResult;
+                    showBitmap();
+
+                    toast("Editing complete");
+
+                } else {
+
+                    toast("Editing failed");
+                }
+            });
         });
     }
 
-    // ==================================================
-    // ROTATE
-    // ==================================================
+    // ----------------------------------------------------
+    // AUTO ENHANCE
+    // ----------------------------------------------------
 
-    private void rotateImage(float degrees) {
+    private void autoEnhance() {
 
-        if (!checkImage()) return;
-
-        saveUndo();
-
-        Matrix matrix = new Matrix();
-
-        matrix.postRotate(degrees);
-
-        Bitmap result = Bitmap.createBitmap(
-                currentBitmap,
-                0,
-                0,
-                currentBitmap.getWidth(),
-                currentBitmap.getHeight(),
-                matrix,
-                true
-        );
-
-        displayBitmap(result);
-
-        status("Rotated " + degrees + " degrees");
+        runEdit("Enhancing photo...",
+                this::enhanceBitmap);
     }
 
-    // ==================================================
-    // FLIP HORIZONTAL
-    // ==================================================
+    private Bitmap enhanceBitmap(Bitmap src) {
 
-    private void flipHorizontal() {
+        Bitmap out = Bitmap.createBitmap(
+                src.getWidth(),
+                src.getHeight(),
+                Bitmap.Config.ARGB_8888);
 
-        if (!checkImage()) return;
+        Canvas canvas = new Canvas(out);
 
-        saveUndo();
+        Paint paint = new Paint(
+                Paint.ANTI_ALIAS_FLAG);
 
-        Matrix matrix = new Matrix();
+        ColorMatrix matrix = new ColorMatrix();
 
-        matrix.preScale(-1f, 1f);
+        matrix.set(new float[]{
+                1.18f, 0, 0, 0, 5,
+                0, 1.18f, 0, 0, 5,
+                0, 0, 1.18f, 0, 5,
+                0, 0, 0, 1, 0
+        });
 
-        Bitmap result = Bitmap.createBitmap(
-                currentBitmap,
-                0,
-                0,
-                currentBitmap.getWidth(),
-                currentBitmap.getHeight(),
-                matrix,
-                true
-        );
+        paint.setColorFilter(
+                new ColorMatrixColorFilter(matrix));
 
-        displayBitmap(result);
+        canvas.drawBitmap(src, 0, 0, paint);
 
-        status("Flipped horizontally");
+        return out;
     }
 
-    // ==================================================
-    // FLIP VERTICAL
-    // ==================================================
+    // ----------------------------------------------------
+    // AUTO COLOR
+    // ----------------------------------------------------
 
-    private void flipVertical() {
+    private void autoColor() {
 
-        if (!checkImage()) return;
-
-        saveUndo();
-
-        Matrix matrix = new Matrix();
-
-        matrix.preScale(1f, -1f);
-
-        Bitmap result = Bitmap.createBitmap(
-                currentBitmap,
-                0,
-                0,
-                currentBitmap.getWidth(),
-                currentBitmap.getHeight(),
-                matrix,
-                true
-        );
-
-        displayBitmap(result);
-
-        status("Flipped vertically");
+        runEdit("Adjusting colors...",
+                this::autoColorBitmap);
     }
 
-    // ==================================================
+    private Bitmap autoColorBitmap(Bitmap src) {
+
+        return adjustBitmap(
+                src, 1.12f, 1.04f, 1.05f, 0);
+    }
+
+    // ----------------------------------------------------
+    // BRIGHTNESS
+    // ----------------------------------------------------
+
+    private void brightness() {
+
+        showSliderDialog(
+                "Brightness",
+                -80, 80, 0,
+                value -> runEdit(
+                        "Adjusting brightness...",
+                        src -> adjustBitmap(
+                                src, 1f, 1f, 1f, value)));
+    }
+
+    // ----------------------------------------------------
+    // SMOOTH
+    // ----------------------------------------------------
+
+    private void smoothImage() {
+
+        runEdit("Smoothing image...",
+                this::smoothBitmap);
+    }
+
+    private Bitmap smoothBitmap(Bitmap src) {
+
+        int w = src.getWidth();
+        int h = src.getHeight();
+
+        Bitmap out = Bitmap.createBitmap(
+                w, h, Bitmap.Config.ARGB_8888);
+
+        int[] pixels = new int[w * h];
+        src.getPixels(pixels, 0, w, 0, 0, w, h);
+
+        int[] result = pixels.clone();
+
+        for (int y = 1; y < h - 1; y++) {
+
+            for (int x = 1; x < w - 1; x++) {
+
+                int index = y * w + x;
+
+                int center = pixels[index];
+
+                int r = Color.red(center);
+                int g = Color.green(center);
+                int b = Color.blue(center);
+
+                for (int dy = -1; dy <= 1; dy++) {
+                    for (int dx = -1; dx <= 1; dx++) {
+
+                        int p = pixels[(y + dy) * w + x + dx];
+
+                        r += Color.red(p);
+                        g += Color.green(p);
+                        b += Color.blue(p);
+                    }
+                }
+
+                result[index] = Color.rgb(
+                        r / 10, g / 10, b / 10);
+            }
+        }
+
+        out.setPixels(result, 0, w, 0, 0, w, h);
+
+        return out;
+    }
+
+    // ----------------------------------------------------
+    // NATURAL SLIM
+    // ----------------------------------------------------
+
+    private void slimPerson() {
+
+        showSliderDialog(
+                "Natural Slim",
+                0, 15, 5,
+                value -> runEdit(
+                        "Applying natural slim...",
+                        src -> slimBitmap(src, value)));
+    }
+
+    private Bitmap slimBitmap(
+            Bitmap src, int intensity) {
+
+        int w = src.getWidth();
+        int h = src.getHeight();
+
+        Bitmap out = Bitmap.createBitmap(
+                w, h, Bitmap.Config.ARGB_8888);
+
+        int strength = Math.min(
+                18, Math.max(0, intensity));
+
+        float centerX = w / 2f;
+
+        for (int y = 0; y < h; y++) {
+
+            float normalizedY = (float) y / h;
+
+            float factor = 1f - (strength / 100f);
+
+            float center = centerX;
+
+            float squeeze = (float) Math.sin(
+                    normalizedY * Math.PI);
+
+            float currentWidth = w * factor;
+
+            float left = center - currentWidth / 2f;
+
+            for (int x = 0; x < w; x++) {
+
+                float srcX = center
+                        + (x - center)
+                        * (1f - (strength / 100f)
+                        * squeeze);
+
+                srcX = Math.max(
+                        0, Math.min(w - 1, srcX));
+
+                int pixel = src.getPixel(
+                        (int) srcX, y);
+
+                out.setPixel(x, y, pixel);
+            }
+        }
+
+        return out;
+    }
+
+    // ----------------------------------------------------
+    // FILTERS
+    // ----------------------------------------------------
+
+    private void warmFilter() {
+
+        runEdit("Applying warm filter...",
+                src -> adjustBitmap(
+                        src, 1.04f, 1.0f, 0.91f, 4));
+    }
+
+    private void coolFilter() {
+
+        runEdit("Applying cool filter...",
+                src -> adjustBitmap(
+                        src, 0.92f, 1.0f, 1.10f, 2));
+    }
+
+    private void blackAndWhite() {
+
+        runEdit("Applying black and white...",
+                src -> grayscaleBitmap(src, false));
+    }
+
+    private void sepiaFilter() {
+
+        runEdit("Applying sepia...",
+                src -> grayscaleBitmap(src, true));
+    }
+
+    private void vignette() {
+
+        runEdit("Applying vignette...",
+                this::vignetteBitmap);
+    }
+
+    private Bitmap grayscaleBitmap(
+            Bitmap src, boolean sepia) {
+
+        int w = src.getWidth();
+        int h = src.getHeight();
+
+        Bitmap out = Bitmap.createBitmap(
+                w, h, Bitmap.Config.ARGB_8888);
+
+        for (int y = 0; y < h; y++) {
+
+            for (int x = 0; x < w; x++) {
+
+                int p = src.getPixel(x, y);
+
+                int r = Color.red(p);
+                int g = Color.green(p);
+                int b = Color.blue(p);
+
+                int gray = (int)(
+                        0.299 * r
+                        + 0.587 * g
+                        + 0.114 * b);
+
+                if (sepia) {
+
+                    r = clamp((int)(
+                            gray * 1.07 + 20));
+
+                    g = clamp((int)(
+                            gray * 0.94 + 10));
+
+                    b = clamp((int)(
+                            gray * 0.72));
+                } else {
+
+                    r = g = b = gray;
+                }
+
+                out.setPixel(
+                        x, y, Color.rgb(r, g, b));
+            }
+        }
+
+        return out;
+    }
+
+    private Bitmap vignetteBitmap(Bitmap src) {
+
+        int w = src.getWidth();
+        int h = src.getHeight();
+
+        Bitmap out = Bitmap.createBitmap(
+                w, h, Bitmap.Config.ARGB_8888);
+
+        float centerX = w / 2f;
+        float centerY = h / 2f;
+
+        float maxDist = (float) Math.sqrt(
+                centerX * centerX + centerY * centerY);
+
+        for (int y = 0; y < h; y++) {
+
+            for (int x = 0; x < w; x++) {
+
+                int p = src.getPixel(x, y);
+
+                float dx = x - centerX;
+                float dy = y - centerY;
+
+                float distance = (float) Math.sqrt(
+                        dx * dx + dy * dy);
+
+                float factor = 1f
+                        - 0.38f * distance / maxDist;
+
+                out.setPixel(x, y, Color.rgb(
+                        clamp((int)(Color.red(p) * factor)),
+                        clamp((int)(Color.green(p) * factor)),
+                        clamp((int)(Color.blue(p) * factor))));
+            }
+        }
+
+        return out;
+    }
+
+    // ----------------------------------------------------
     // CROP
-    // ==================================================
+    // ----------------------------------------------------
 
     private void cropImage() {
 
-        if (!checkImage()) return;
-
-        EditText percentInput = new EditText(this);
-
-        percentInput.setHint("Crop percentage (e.g. 10)");
-        percentInput.setInputType(2);
-        percentInput.setText("10");
-
         new AlertDialog.Builder(this)
-                .setTitle("✂️ Crop Image")
-                .setMessage("Crop equally from all sides.")
-                .setView(percentInput)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Crop", (dialog, which) -> {
+                .setTitle("Crop Image")
+                .setMessage(
+                        "Crop 10% from all edges?")
+                .setPositiveButton("Crop", (d, w) -> {
 
-                    try {
-
-                        int percent = Integer.parseInt(
-                                percentInput.getText().toString()
-                        );
-
-                        if (percent < 0 || percent >= 45) {
-
-                            Toast.makeText(
-                                    this,
-                                    "Enter 0 to 44",
-                                    Toast.LENGTH_SHORT
-                            ).show();
-
-                            return;
-                        }
-
-                        int w = currentBitmap.getWidth();
-                        int h = currentBitmap.getHeight();
-
-                        int cropX = (int) (w * percent / 100f);
-                        int cropY = (int) (h * percent / 100f);
-
-                        int newW = w - cropX * 2;
-                        int newH = h - cropY * 2;
-
-                        saveUndo();
-
-                        Bitmap cropped = Bitmap.createBitmap(
-                                currentBitmap,
-                                cropX,
-                                cropY,
-                                newW,
-                                newH
-                        );
-
-                        displayBitmap(cropped);
-
-                        status("Crop completed");
-
-                    } catch (Exception e) {
-
-                        Toast.makeText(
-                                this,
-                                "Invalid crop value",
-                                Toast.LENGTH_SHORT
-                        ).show();
-                    }
+                    runEdit("Cropping...",
+                            this::cropBitmap);
                 })
+                .setNegativeButton("Cancel", null)
                 .show();
     }
 
-    // ==================================================
+    private Bitmap cropBitmap(Bitmap src) {
+
+        int w = src.getWidth();
+        int h = src.getHeight();
+
+        int marginX = (int)(w * 0.10f);
+        int marginY = (int)(h * 0.10f);
+
+        return Bitmap.createBitmap(
+                src,
+                marginX,
+                marginY,
+                w - marginX * 2,
+                h - marginY * 2);
+    }
+
+    // ----------------------------------------------------
+    // ROTATE
+    // ----------------------------------------------------
+
+    private void rotateImage() {
+
+        runEdit("Rotating...",
+                src -> rotateBitmap(src, 90));
+    }
+
+    private Bitmap rotateBitmap(
+            Bitmap src, float degrees) {
+
+        Matrix matrix = new Matrix();
+        matrix.postRotate(degrees);
+
+        return Bitmap.createBitmap(
+                src, 0, 0,
+                src.getWidth(),
+                src.getHeight(),
+                matrix, true);
+    }
+
+    // ----------------------------------------------------
+    // FLIP
+    // ----------------------------------------------------
+
+    private void flipHorizontal() {
+
+        runEdit("Flipping...",
+                src -> flipBitmap(src, true));
+    }
+
+    private void flipVertical() {
+
+        runEdit("Flipping...",
+                src -> flipBitmap(src, false));
+    }
+
+    private Bitmap flipBitmap(
+            Bitmap src, boolean horizontal) {
+
+        Matrix matrix = new Matrix();
+
+        matrix.setScale(
+                horizontal ? -1 : 1,
+                horizontal ? 1 : -1);
+
+        return Bitmap.createBitmap(
+                src, 0, 0,
+                src.getWidth(),
+                src.getHeight(),
+                matrix, true);
+    }
+
+    // ----------------------------------------------------
     // RESIZE
-    // ==================================================
+    // ----------------------------------------------------
 
     private void resizeImage() {
 
-        if (!checkImage()) return;
+        showSliderDialog(
+                "Resize image",
+                25, 150, 100,
+                value -> runEdit(
+                        "Resizing...",
+                        src -> Bitmap.createScaledBitmap(
+                                src,
+                                Math.max(1,
+                                        src.getWidth()
+                                        * value / 100),
+                                Math.max(1,
+                                        src.getHeight()
+                                        * value / 100),
+                                true)));
+    }
 
-        LinearLayout layout = new LinearLayout(this);
+    // ----------------------------------------------------
+    // ORIGINAL / RESET
+    // ----------------------------------------------------
 
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setPadding(dp(20), dp(8), dp(20), dp(8));
+    private void showOriginal() {
 
-        EditText widthInput = new EditText(this);
-        widthInput.setHint("Width (pixels)");
-        widthInput.setInputType(2);
-        widthInput.setText(String.valueOf(currentBitmap.getWidth()));
+        if (originalBitmap == null) return;
 
-        EditText heightInput = new EditText(this);
-        heightInput.setHint("Height (pixels)");
-        heightInput.setInputType(2);
-        heightInput.setText(String.valueOf(currentBitmap.getHeight()));
+        currentBitmap = originalBitmap.copy(
+                Bitmap.Config.ARGB_8888, true);
 
-        layout.addView(widthInput);
-        layout.addView(heightInput);
+        showBitmap();
+    }
+
+    private void resetImage() {
+
+        if (originalBitmap == null) return;
+
+        saveHistory();
+
+        currentBitmap = originalBitmap.copy(
+                Bitmap.Config.ARGB_8888, true);
+
+        showBitmap();
+
+        toast("Image reset");
+    }
+
+    // ----------------------------------------------------
+    // REMOVE PEOPLE - MANUAL MASK + BASIC FILL
+    // ----------------------------------------------------
+
+    private void removePeople() {
+
+        if (currentBitmap == null) {
+            requireImage();
+            return;
+        }
+
+        maskingMode = true;
+
+        maskView.clearMask();
+        maskView.setMaskMode(true);
 
         new AlertDialog.Builder(this)
-                .setTitle("📐 Resize Image")
-                .setView(layout)
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Resize", (dialog, which) -> {
-
-                    try {
-
-                        int w = Integer.parseInt(
-                                widthInput.getText().toString()
-                        );
-
-                        int h = Integer.parseInt(
-                                heightInput.getText().toString()
-                        );
-
-                        if (w < 1 || h < 1 || w > 8000 || h > 8000) {
-
-                            Toast.makeText(
-                                    this,
-                                    "Size must be between 1 and 8000 pixels",
-                                    Toast.LENGTH_LONG
-                            ).show();
-
-                            return;
-                        }
-
-                        saveUndo();
-
-                        Bitmap resized = Bitmap.createScaledBitmap(
-                                currentBitmap,
-                                w,
-                                h,
-                                true
-                        );
-
-                        displayBitmap(resized);
-
-                        status("Resize completed");
-
-                    } catch (Exception e) {
-
-                        Toast.makeText(
-                                this,
-                                "Invalid dimensions",
-                                Toast.LENGTH_SHORT
-                        ).show();
-                    }
+                .setTitle("Remove People")
+                .setMessage(
+                        "Paint over the person or unwanted object "
+                        + "with your finger.\n\n"
+                        + "Then press REMOVE to replace the "
+                        + "marked area using nearby pixels.\n\n"
+                        + "This offline version uses basic pixel "
+                        + "filling, not AI inpainting.")
+                .setPositiveButton("START", (d, w) -> {
+                    toast("Paint over the person to remove");
+                })
+                .setNegativeButton("CANCEL", (d, w) -> {
+                    cancelMaskMode();
                 })
                 .show();
     }
 
-    // ==================================================
-    // SAVE IMAGE
-    // ==================================================
+    private void cancelMaskMode() {
 
-    private void saveImage() {
+        maskingMode = false;
+        maskView.setMaskMode(false);
+        maskView.clearMask();
+        maskView.invalidate();
+    }
 
-        if (!checkImage()) return;
+    private void performRemoval() {
 
-        OutputStream outputStream = null;
+        if (!maskView.hasMask()) {
+            toast("Paint the area you want to remove");
+            return;
+        }
 
-        try {
+        final Bitmap source = currentBitmap.copy(
+                Bitmap.Config.ARGB_8888, true);
 
-            ContentValues values = new ContentValues();
+        final Bitmap mask = maskView.getMaskBitmap();
 
-            values.put(
-                    MediaStore.Images.Media.DISPLAY_NAME,
-                    "AI_Photo_Studio_" + System.currentTimeMillis() + ".jpg"
-            );
+        maskingMode = false;
+        maskView.setMaskMode(false);
 
-            values.put(
-                    MediaStore.Images.Media.MIME_TYPE,
-                    "image/jpeg"
-            );
+        isBusy = true;
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        toast("Removing selected area...");
 
-                values.put(
-                        MediaStore.Images.Media.RELATIVE_PATH,
-                        "Pictures/AI Photo Studio"
-                );
+        executor.execute(() -> {
 
-                values.put(
-                        MediaStore.Images.Media.IS_PENDING,
-                        1
-                );
-            }
+            Bitmap result = removeMaskedArea(
+                    source, mask);
 
-            Uri uri = getContentResolver().insert(
-                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                    values
-            );
+            mainHandler.post(() -> {
 
-            if (uri == null) {
-                throw new Exception("Unable to create image file");
-            }
+                isBusy = false;
 
-            outputStream = getContentResolver().openOutputStream(uri);
+                if (result != null) {
 
-            currentBitmap.compress(
-                    Bitmap.CompressFormat.JPEG,
-                    95,
-                    outputStream
-            );
+                    saveHistory();
 
-            outputStream.flush();
+                    currentBitmap = result;
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    maskView.clearMask();
 
-                ContentValues finish = new ContentValues();
+                    showBitmap();
 
-                finish.put(
-                        MediaStore.Images.Media.IS_PENDING,
-                        0
-                );
+                    toast("Area processing complete");
+                }
+            });
+        });
+    }
 
-                getContentResolver().update(uri, finish, null, null);
-            }
+    /*
+     * Basic offline replacement.
+     * This is NOT AI inpainting. It averages nearby
+     * unmasked pixels to fill the painted area.
+     */
+    private Bitmap removeMaskedArea(
+            Bitmap source, Bitmap mask) {
 
-            Toast.makeText(
-                    this,
-                    "Saved to Pictures/AI Photo Studio",
-                    Toast.LENGTH_LONG
-            ).show();
+        int w = source.getWidth();
+        int h = source.getHeight();
 
-            status("Image saved");
+        int[] pixels = new int[w * h];
+        int[] maskPixels = new int[w * h];
 
-        } catch (Exception e) {
+        source.getPixels(
+                pixels, 0, w, 0, 0, w, h);
 
-            Toast.makeText(
-                    this,
-                    "Save failed: " + e.getMessage(),
-                    Toast.LENGTH_LONG
-            ).show();
+        mask.getPixels(
+                maskPixels, 0, w, 0, 0, w, h);
 
-        } finally {
+        int[] output = pixels.clone();
 
-            try {
+        int radius = 5;
 
-                if (outputStream != null) {
-                    outputStream.close();
+        for (int y = radius; y < h - radius; y++) {
+
+            for (int x = radius; x < w - radius; x++) {
+
+                int index = y * w + x;
+
+                if (Color.alpha(maskPixels[index]) == 0) {
+                    continue;
                 }
 
-            } catch (Exception ignored) {
+                long r = 0, g = 0, b = 0;
+                int count = 0;
+
+                for (int dy = -radius; dy <= radius; dy++) {
+
+                    for (int dx = -radius; dx <= radius; dx++) {
+
+                        if (Math.abs(dx) <= 1
+                                && Math.abs(dy) <= 1) {
+                            continue;
+                        }
+
+                        int nx = x + dx;
+                        int ny = y + dy;
+
+                        int ni = ny * w + nx;
+
+                        if (Color.alpha(maskPixels[ni]) > 0) {
+                            continue;
+                        }
+
+                        int p = pixels[ni];
+
+                        r += Color.red(p);
+                        g += Color.green(p);
+                        b += Color.blue(p);
+
+                        count++;
+                    }
+                }
+
+                if (count > 0) {
+
+                    output[index] = Color.rgb(
+                            (int)(r / count),
+                            (int)(g / count),
+                            (int)(b / count));
+                }
             }
+        }
+
+        Bitmap result = Bitmap.createBitmap(
+                w, h, Bitmap.Config.ARGB_8888);
+
+        result.setPixels(
+                output, 0, w, 0, 0, w, h);
+
+        return result;
+    }
+
+    // ----------------------------------------------------
+    // MASK PAINT VIEW
+    // ----------------------------------------------------
+
+    private class MaskView extends View {
+
+        private Bitmap maskBitmap;
+        private Canvas maskCanvas;
+
+        private Paint maskPaint;
+        private Paint displayPaint;
+
+        private Path displayPath;
+
+        private boolean maskMode = false;
+
+        private float lastX, lastY;
+
+        MaskView() {
+
+            super(MainActivity.this);
+
+            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+
+            maskPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+            maskPaint.setColor(Color.WHITE);
+            maskPaint.setStyle(Paint.Style.STROKE);
+            maskPaint.setStrokeWidth(brushSize);
+            maskPaint.setStrokeCap(Paint.Cap.ROUND);
+            maskPaint.setStrokeJoin(Paint.Join.ROUND);
+
+            displayPaint = new Paint(
+                    Paint.ANTI_ALIAS_FLAG);
+
+            displayPaint.setColor(
+                    Color.argb(110, 255, 70, 70));
+
+            displayPaint.setStyle(Paint.Style.STROKE);
+            displayPaint.setStrokeWidth(brushSize);
+            displayPaint.setStrokeCap(Paint.Cap.ROUND);
+            displayPaint.setStrokeJoin(Paint.Join.ROUND);
+
+            displayPath = new Path();
+        }
+
+        void setMaskMode(boolean enabled) {
+            maskMode = enabled;
+            invalidate();
+        }
+
+        void clearMask() {
+
+            displayPath.reset();
+
+            if (maskBitmap != null) {
+
+                maskBitmap.eraseColor(Color.TRANSPARENT);
+            }
+
+            invalidate();
+        }
+
+        boolean hasMask() {
+
+            if (maskBitmap == null) return false;
+
+            int[] pixels = new int[
+                    maskBitmap.getWidth()
+                    * maskBitmap.getHeight()];
+
+            maskBitmap.getPixels(
+                    pixels, 0,
+                    maskBitmap.getWidth(),
+                    0, 0,
+                    maskBitmap.getWidth(),
+                    maskBitmap.getHeight());
+
+            for (int p : pixels) {
+                if (Color.alpha(p) > 0) return true;
+            }
+
+            return false;
+        }
+
+        Bitmap getMaskBitmap() {
+
+            if (maskBitmap == null
+                    || currentBitmap == null) {
+                return null;
+            }
+
+            return Bitmap.createScaledBitmap(
+                    maskBitmap,
+                    currentBitmap.getWidth(),
+                    currentBitmap.getHeight(),
+                    true);
+        }
+
+        private void ensureMask() {
+
+            if (maskBitmap != null) return;
+
+            maskBitmap = Bitmap.createBitmap(
+                    Math.max(1, getWidth()),
+                    Math.max(1, getHeight()),
+                    Bitmap.Config.ARGB_8888);
+
+            maskCanvas = new Canvas(maskBitmap);
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+
+            super.onDraw(canvas);
+
+            if (maskMode) {
+
+                canvas.drawPath(
+                        displayPath, displayPaint);
+            }
+        }
+
+        @Override
+        public boolean onTouchEvent(MotionEvent event) {
+
+            if (!maskMode) return false;
+
+            float x = event.getX();
+            float y = event.getY();
+
+            switch (event.getAction()) {
+
+                case MotionEvent.ACTION_DOWN:
+
+                    ensureMask();
+
+                    lastX = x;
+                    lastY = y;
+
+                    displayPath.moveTo(x, y);
+
+                    maskPaint.setStrokeWidth(
+                            dp(brushSize));
+
+                    displayPaint.setStrokeWidth(
+                            dp(brushSize));
+
+                    maskCanvas.drawCircle(
+                            x, y,
+                            dp(brushSize) / 2f,
+                            new Paint() {{
+                                setColor(Color.WHITE);
+                                setStyle(Paint.Style.FILL);
+                            }});
+
+                    invalidate();
+
+                    return true;
+
+                case MotionEvent.ACTION_MOVE:
+
+                    ensureMask();
+
+                    displayPath.lineTo(x, y);
+
+                    maskCanvas.drawLine(
+                            lastX, lastY, x, y,
+                            maskPaint);
+
+                    lastX = x;
+                    lastY = y;
+
+                    invalidate();
+
+                    return true;
+
+                case MotionEvent.ACTION_UP:
+
+                    displayPath.lineTo(x, y);
+
+                    maskCanvas.drawLine(
+                            lastX, lastY, x, y,
+                            maskPaint);
+
+                    invalidate();
+
+                    return true;
+            }
+
+            return true;
         }
     }
 
-    // ==================================================
-    // REMOVE PEOPLE - PLACEHOLDER
-    // ==================================================
+    // ----------------------------------------------------
+    // AUTO EDIT
+    // ----------------------------------------------------
 
-    private void removePeoplePlaceholder() {
+    private void autoEdit() {
 
-        new AlertDialog.Builder(this)
-                .setTitle("Background People Removal")
-                .setMessage(
-                        "The tool interface is ready, but actual person " +
-                        "removal requires an offline AI segmentation and " +
-                        "inpainting model. This model has not yet been " +
-                        "integrated into this version."
-                )
-                .setPositiveButton("OK", null)
-                .show();
+        runEdit("Auto editing...",
+                src -> enhanceBitmap(src));
     }
 
-    // ==================================================
-    // FILTER MENU
-    // ==================================================
+    // ----------------------------------------------------
+    // FILTER DIALOG
+    // ----------------------------------------------------
 
     private void showFilters() {
 
-        String[] filters = {
+        String[] options = {
                 "Warm",
                 "Cool",
                 "Black & White",
@@ -1219,27 +1383,22 @@ public class MainActivity extends Activity {
         };
 
         new AlertDialog.Builder(this)
-                .setTitle("Creative Filters")
-                .setItems(filters, (dialog, which) -> {
+                .setTitle("Filters")
+                .setItems(options, (d, which) -> {
 
                     switch (which) {
-
                         case 0:
                             warmFilter();
                             break;
-
                         case 1:
                             coolFilter();
                             break;
-
                         case 2:
                             blackAndWhite();
                             break;
-
                         case 3:
                             sepiaFilter();
                             break;
-
                         case 4:
                             vignette();
                             break;
@@ -1248,74 +1407,277 @@ public class MainActivity extends Activity {
                 .show();
     }
 
-    // ==================================================
-    // APP INFORMATION
-    // ==================================================
+    // ----------------------------------------------------
+    // ABOUT
+    // ----------------------------------------------------
 
-    private void showAppInfo() {
+    private void showAbout() {
 
         new AlertDialog.Builder(this)
                 .setTitle("AI Photo Studio")
                 .setMessage(
-                        "Version 1.0\n\n" +
-                                "Photo editing tools:\n" +
-                                "• Auto enhancement\n" +
-                                "• Auto color\n" +
-                                "• Natural slimming\n" +
-                                "• Smooth\n" +
-                                "• Crop\n" +
-                                "• Rotate\n" +
-                                "• Resize\n" +
-                                "• Flip\n" +
-                                "• Creative filters\n" +
-                                "• Undo and redo\n" +
-                                "• Save to gallery\n\n" +
-                                "Offline processing.\n" +
-                                "No OpenAI API key required."
-                )
+                        "Offline Photo Editor\n\n"
+                        + "Edit photos using local "
+                        + "image-processing tools.\n\n"
+                        + "No OpenAI API key required.")
                 .setPositiveButton("OK", null)
                 .show();
     }
 
-    // ==================================================
-    // HELPERS
-    // ==================================================
+    // ----------------------------------------------------
+    // SAVE TO GALLERY
+    // ----------------------------------------------------
 
-    private boolean checkImage() {
+    private void saveImage() {
 
         if (currentBitmap == null) {
-
-            Toast.makeText(
-                    this,
-                    "Please select a photo first",
-                    Toast.LENGTH_SHORT
-            ).show();
-
-            return false;
+            requireImage();
+            return;
         }
 
-        return true;
-    }
+        try {
 
-    private void status(String message) {
+            String filename =
+                    "AIPhotoStudio_"
+                    + System.currentTimeMillis()
+                    + ".jpg";
 
-        if (statusText != null) {
-            statusText.setText(message);
+            ContentValues values = new ContentValues();
+
+            values.put(
+                    MediaStore.Images.Media.DISPLAY_NAME,
+                    filename);
+
+            values.put(
+                    MediaStore.Images.Media.MIME_TYPE,
+                    "image/jpeg");
+
+            if (Build.VERSION.SDK_INT >= 29) {
+
+                values.put(
+                        MediaStore.Images.Media.RELATIVE_PATH,
+                        "Pictures/AI Photo Studio");
+
+                values.put(
+                        MediaStore.Images.Media.IS_PENDING,
+                        1);
+            }
+
+            Uri uri = getContentResolver().insert(
+                    MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    values);
+
+            if (uri == null) {
+                toast("Unable to save photo");
+                return;
+            }
+
+            OutputStream output =
+                    getContentResolver().openOutputStream(uri);
+
+            currentBitmap.compress(
+                    Bitmap.CompressFormat.JPEG,
+                    95, output);
+
+            output.close();
+
+            if (Build.VERSION.SDK_INT >= 29) {
+
+                values.clear();
+
+                values.put(
+                        MediaStore.Images.Media.IS_PENDING,
+                        0);
+
+                getContentResolver().update(
+                        uri, values, null, null);
+            }
+
+            toast("Saved to Pictures/AI Photo Studio");
+
+        } catch (Exception e) {
+
+            toast("Save failed");
         }
     }
 
-    private int dp(float value) {
+    // ----------------------------------------------------
+    // SLIDER DIALOG
+    // ----------------------------------------------------
 
-        return (int) (
-                value * getResources()
-                        .getDisplayMetrics()
-                        .density
-        );
+    interface SliderCallback {
+        void onSelected(int value);
     }
 
-    // ==================================================
+    private void showSliderDialog(
+            String title,
+            int min,
+            int max,
+            int initial,
+            SliderCallback callback) {
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(20), dp(10), dp(20), dp(10));
+
+        TextView valueText = text(
+                String.valueOf(initial),
+                18, Color.WHITE, true);
+
+        valueText.setGravity(Gravity.CENTER);
+
+        SeekBar seekBar = new SeekBar(this);
+
+        seekBar.setMax(max - min);
+        seekBar.setProgress(initial - min);
+
+        seekBar.setOnSeekBarChangeListener(
+                new SeekBar.OnSeekBarChangeListener() {
+
+                    @Override
+                    public void onProgressChanged(
+                            SeekBar bar,
+                            int progress,
+                            boolean fromUser) {
+
+                        valueText.setText(
+                                String.valueOf(min + progress));
+                    }
+
+                    @Override
+                    public void onStartTrackingTouch(
+                            SeekBar bar) {}
+
+                    @Override
+                    public void onStopTrackingTouch(
+                            SeekBar bar) {}
+                });
+
+        layout.addView(valueText);
+        layout.addView(seekBar);
+
+        new AlertDialog.Builder(this)
+                .setTitle(title)
+                .setView(layout)
+                .setPositiveButton("Apply",
+                        (dialog, which) -> {
+
+                            callback.onSelected(
+                                    min + seekBar.getProgress());
+                        })
+                .setNegativeButton("Cancel", null)
+                .show();
+    }
+
+    // ----------------------------------------------------
+    // BITMAP ADJUSTMENT
+    // ----------------------------------------------------
+
+    private Bitmap adjustBitmap(
+            Bitmap src,
+            float red,
+            float green,
+            float blue,
+            float brightness) {
+
+        Bitmap out = Bitmap.createBitmap(
+                src.getWidth(),
+                src.getHeight(),
+                Bitmap.Config.ARGB_8888);
+
+        Canvas canvas = new Canvas(out);
+
+        Paint paint = new Paint(
+                Paint.ANTI_ALIAS_FLAG);
+
+        ColorMatrix matrix = new ColorMatrix(
+                new float[]{
+                        red, 0, 0, 0, brightness,
+                        0, green, 0, 0, brightness,
+                        0, 0, blue, 0, brightness,
+                        0, 0, 0, 1, 0
+                });
+
+        paint.setColorFilter(
+                new ColorMatrixColorFilter(matrix));
+
+        canvas.drawBitmap(src, 0, 0, paint);
+
+        return out;
+    }
+
+    private int clamp(int value) {
+
+        return Math.max(0, Math.min(255, value));
+    }
+
+    // ----------------------------------------------------
+    // UI HELPERS
+    // ----------------------------------------------------
+
+    private TextView text(
+            String value,
+            int size,
+            int color,
+            boolean bold) {
+
+        TextView tv = new TextView(this);
+
+        tv.setText(value);
+        tv.setTextSize(size);
+        tv.setTextColor(color);
+
+        if (bold) {
+            tv.setTypeface(
+                    android.graphics.Typeface.DEFAULT,
+                    android.graphics.Typeface.BOLD);
+        }
+
+        return tv;
+    }
+
+    private Button button(String value) {
+
+        Button b = new Button(this);
+
+        b.setText(value);
+        b.setTextColor(Color.WHITE);
+        b.setBackgroundColor(
+                Color.rgb(112, 75, 220));
+
+        return b;
+    }
+
+    private void addSpace(
+            LinearLayout layout,
+            int size) {
+
+        View spacer = new View(this);
+
+        layout.addView(spacer,
+                new LinearLayout.LayoutParams(
+                        -1, dp(size)));
+    }
+
+    private int dp(int value) {
+
+        return (int)(value
+                * getResources()
+                .getDisplayMetrics()
+                .density);
+    }
+
+    private void toast(String message) {
+
+        Toast.makeText(
+                this,
+                message,
+                Toast.LENGTH_SHORT).show();
+    }
+
+    // ----------------------------------------------------
     // CLEANUP
-    // ==================================================
+    // ----------------------------------------------------
 
     @Override
     protected void onDestroy() {
@@ -1324,11 +1686,8 @@ public class MainActivity extends Activity {
 
         executor.shutdown();
 
-        clearStack(undoStack);
-        clearStack(redoStack);
-
-        if (photoAI != null) {
-            photoAI.shutdown();
+        if (maskView != null) {
+            maskView.clearMask();
         }
     }
 }
