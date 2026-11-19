@@ -70,7 +70,21 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        createUI();
+        try {
+            createUI();
+        } catch (Throwable startupError) {
+            // Keep the app from closing silently; show the startup error on screen.
+            TextView errorView = new TextView(this);
+            errorView.setTextColor(Color.WHITE);
+            errorView.setBackgroundColor(Color.rgb(24, 24, 30));
+            errorView.setPadding(dp(20), dp(24), dp(20), dp(24));
+            errorView.setTextSize(15);
+            errorView.setText("AI Photo Studio could not start.\n\n"
+                    + startupError.getClass().getSimpleName() + ": "
+                    + String.valueOf(startupError.getMessage())
+                    + "\n\nPlease send this message to support.");
+            setContentView(errorView);
+        }
     }
 
     // ----------------------------------------------------
@@ -345,46 +359,81 @@ public class MainActivity extends Activity {
     }
 
     private void loadImage(Uri uri) {
-
         try {
-
-            InputStream input = getContentResolver()
-                    .openInputStream(uri);
-
-            Bitmap bitmap = BitmapFactory.decodeStream(input);
-
-            if (input != null) {
-                input.close();
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            try (InputStream stream = getContentResolver().openInputStream(uri)) {
+                BitmapFactory.decodeStream(stream, null, bounds);
             }
 
-            if (bitmap == null) {
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
                 toast("Unable to load image");
                 return;
             }
 
-            // Limit memory use for large images.
-            bitmap = resizeBitmapIfNeeded(bitmap, 2048);
+            // Decode a smaller image first to avoid loading full-resolution photos
+            // into memory. The editor keeps images at a maximum of 1280 pixels.
+            final int maxSize = 1280;
+            int sampleSize = 1;
+            while (bounds.outWidth / sampleSize > maxSize
+                    || bounds.outHeight / sampleSize > maxSize) {
+                sampleSize *= 2;
+            }
 
-            originalBitmap = bitmap.copy(
-                    Bitmap.Config.ARGB_8888, true);
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = sampleSize;
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            Bitmap bitmap;
+            try (InputStream stream = getContentResolver().openInputStream(uri)) {
+                bitmap = BitmapFactory.decodeStream(stream, null, options);
+            }
 
-            currentBitmap = bitmap.copy(
-                    Bitmap.Config.ARGB_8888, true);
+            if (bitmap == null) {
+                toast("Unable to load photo");
+                return;
+            }
 
-            undoStack.clear();
-            redoStack.clear();
+            bitmap = resizeBitmapIfNeeded(bitmap, maxSize);
+            Bitmap newOriginal = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+            Bitmap newCurrent = bitmap.copy(Bitmap.Config.ARGB_8888, true);
+            if (newOriginal == null || newCurrent == null) {
+                if (newOriginal != null) newOriginal.recycle();
+                if (newCurrent != null) newCurrent.recycle();
+                bitmap.recycle();
+                toast("Not enough memory to open this photo");
+                return;
+            }
+
+            clearHistoryStacks();
+            recycleBitmap(originalBitmap);
+            recycleBitmap(currentBitmap);
+            originalBitmap = newOriginal;
+            currentBitmap = newCurrent;
+            recycleBitmap(bitmap);
 
             maskingMode = false;
-            maskView.clearMask();
-
+            if (maskView != null) maskView.clearMask();
             showBitmap();
-
             toast("Photo loaded successfully");
 
+        } catch (OutOfMemoryError memoryError) {
+            System.gc();
+            toast("Photo is too large for available memory. Try a smaller image.");
         } catch (Exception e) {
-
+            e.printStackTrace();
             toast("Unable to open photo");
         }
+    }
+
+
+    private void clearHistoryStacks() {
+        while (!undoStack.isEmpty()) recycleBitmap(undoStack.pop());
+        while (!redoStack.isEmpty()) recycleBitmap(redoStack.pop());
+    }
+
+
+    private void recycleBitmap(Bitmap bitmap) {
+        if (bitmap != null && !bitmap.isRecycled()) bitmap.recycle();
     }
 
     private Bitmap resizeBitmapIfNeeded(
@@ -516,8 +565,10 @@ public class MainActivity extends Activity {
 
             try {
                 result = operation.apply(input);
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 e.printStackTrace();
+            } finally {
+                if (input != null && !input.isRecycled()) input.recycle();
             }
 
             final Bitmap finalResult = result;
@@ -530,7 +581,10 @@ public class MainActivity extends Activity {
 
                     saveHistory();
 
+                    Bitmap previous = currentBitmap;
                     currentBitmap = finalResult;
+                    if (previous != null && previous != finalResult
+                            && !previous.isRecycled()) previous.recycle();
                     showBitmap();
 
                     toast("Editing complete");
