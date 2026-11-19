@@ -12,7 +12,7 @@ import androidx.appcompat.app.AppCompatActivity;
  * Assumes you already have a selected Bitmap named currentBitmap and an
  * ImageView named imagePreview.
  */
-public classpublic class MainActivity extends AppCompatActivity { 
+public class MainActivity extends AppCompatActivity { 
     private PhotoAIEngine photoAI;
 
     public void initializePhotoAI() {
