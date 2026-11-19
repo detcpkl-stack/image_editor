@@ -9,7 +9,7 @@
         android:usesCleartextTraffic="false">
 
         <activity
-            android:name="com.example.photoai.MainActivity"
+            android:name="com.example.aiphotostudio.MainActivity"
             android:exported="true"
             android:screenOrientation="unspecified">
 
