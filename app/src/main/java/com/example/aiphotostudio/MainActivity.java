@@ -16,6 +16,8 @@ import android.graphics.Path;
 import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.net.Uri;
+import java.util.ArrayList;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
