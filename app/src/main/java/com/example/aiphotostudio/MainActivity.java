@@ -115,7 +115,7 @@ public class MainActivity extends Activity {
 
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        imageView.setAdjustViewBounds(true;
+        imageView.setAdjustViewBounds(true);
 
         imageFrame.addView(imageView,
                 new FrameLayout.LayoutParams(
