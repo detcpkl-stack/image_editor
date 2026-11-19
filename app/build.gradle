@@ -1,28 +1,11 @@
-
-plugins {
-    id 'com.android.application'
-}
-
 android {
-    namespace 'com.example.aiphotostudio'
+    namespace 'com.example.photoai'
+
     compileSdk 35
 
     defaultConfig {
-        applicationId 'com.example.aiphotostudio'
-        minSdk 31
+        applicationId 'com.example.photoai'
+        minSdk 23
         targetSdk 35
-        versionCode 1
-        versionName '1.0'
-
-        buildConfigField "String", "AI_SERVER_URL", "\"https://ai-photo-studio-api-l2b0.onrender.com\""
-    }
-
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-
-    buildFeatures {
-        buildConfig true
     }
 }
