@@ -5,13 +5,14 @@ import android.widget.Toast;
 
 import com.example.photoai.OpenCvPhotoAIEngine;
 import com.example.photoai.PhotoAIEngine;
+import androidx.appcompat.app.AppCompatActivity;
 
 /**
  * Copy the relevant methods into your existing MainActivity.
  * Assumes you already have a selected Bitmap named currentBitmap and an
  * ImageView named imagePreview.
  */
-public class PhotoAIIntegrationExample {
+public classpublic class MainActivity extends AppCompatActivity { 
     private PhotoAIEngine photoAI;
 
     public void initializePhotoAI() {
